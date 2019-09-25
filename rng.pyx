@@ -187,8 +187,7 @@ cdef class Range(object):
         cdef int i
         cdef moab.EntityHandle rtn
         cdef np.ndarray[np.int64_t, ndim = 1] keyArray
-        cdef np.ndarray[np.uint64_t, ndim = 1] keyArrayU
-        if isinstance(key, int):
+        if isinstance(key, int) or isinstance(key, np.int64):
             return self.get_int_key(key)
         elif isinstance(key, np.uint64):
             return Range(key)
@@ -203,6 +202,8 @@ cdef class Range(object):
                rtnrng.insert(self.get_int_key(keyitem))
              return rtnrng
         elif isinstance(key, np.ndarray):
+            if key.dtype is not  np.dtype('int64'):
+              raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
             keyArray = key
             for i in range(keyArray.size):
               rtnrng.insert(self.get_int_key(keyArray[i]))
@@ -234,12 +235,10 @@ cdef class Range(object):
       elif isinstance(key, list):
           for keyitem in key:
             rtnvec.push_back(self.get_int_key(keyitem))
-          return np.asarray(rtnvec, dtype = np.uint64)
+          return np.asarray(rtnvec, dtype = np.int64)
       elif isinstance(key, np.ndarray):
-          keyArray = key
-          for i in range(keyArray.size):
-            rtnvec.push_back(self.get_int_key(keyArray[i]))
-          return np.asarray(rtnvec, dtype = np.uint64)
+        if key.dtype == np.int64:
+          return key
       else:
           raise ValueError("Invalid key (type: {}) provided.".format(type(key)))
 

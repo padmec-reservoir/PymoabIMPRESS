@@ -19,7 +19,6 @@ from libc.stdlib cimport malloc
 from collections import Iterable
 
 cdef void* null = NULL
-
 cdef class Core(object):
 
     def __cinit__(self):
@@ -1095,13 +1094,14 @@ cdef class Core(object):
         check_error(err, exceptions)
         return adj
 
-    def get_ord_adjacencies(self, from_ent, int to_dim, bint create_if_missing = False, int op_type = types.INTERSECT, exceptions = ()):
+    def get_ord_adjacencies(self, from_ent, int to_dim, Tag tag_handle, bint create_if_missing = False, int op_type = types.INTERSECT, exceptions = ()):
 
         cdef moab.ErrorCode err
         cdef moab.EntityHandle ms_handle
         cdef Range r
         cdef int idx_count = 0
         cdef vector[eh.EntityHandle] rangeList
+        cdef np.ndarray[np.int32_t] tag_array
         if isinstance(from_ent, Range):
             r = from_ent
         else:
@@ -1112,19 +1112,20 @@ cdef class Core(object):
         cdef int j
         cdef int sizj
         cdef int siz = r.size()
-        cdef np.ndarray[dtype = int, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
+        cdef np.ndarray[np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
         for i in range(siz):
           inR.insert(r[i])
           err = self.inst.get_adjacencies(deref(inR.inst), to_dim, create_if_missing, deref(adjs.inst), op_type)
           inR.pop_front()
           check_error(err, exceptions)
           sizj = adjs.size()
+          tag_array = self.tag_get_data(tag_handle, adjs, flat=True)
           for j in range(sizj):
-            rangeList.push_back(adjs[j])
+            rangeList.push_back(tag_array[j])
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
-        return np.delete(np.array(np.split(np.array(rangeList, dtype = np.uint64), idx_array)), -1)
+        return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
 
     def type_from_handle(self, entity_handle):
         """
@@ -1411,7 +1412,7 @@ cdef class Core(object):
 
         return np.asarray(ehs_out, dtype = np.uint64)
 
-    def get_ord_connectivity(self, entity_handles, exceptions = ()):
+    def get_ord_connectivity(self, entity_handles, Tag tag_handle, exceptions = ()):
         """
         Returns the vertex handles which make up the mesh entities passed in via
         the entity_handles argument.
@@ -1453,6 +1454,7 @@ cdef class Core(object):
         """
         cdef moab.ErrorCode err
         cdef np.ndarray[eh.EntityHandle] ehs
+        cdef np.ndarray[np.int32_t] tag_array
         if isinstance(entity_handles, _eh_py_type):
             ehs = _eh_array([entity_handles,])
         elif isinstance(entity_handles, np.ndarray):
@@ -1474,7 +1476,8 @@ cdef class Core(object):
           typej = self.inst.type_from_handle(<unsigned long> ehs[i])
           idx_count = idx_count + sizenum[typej]
           idx_array[i] = idx_count
-        return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)
+        tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
+        return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)
 
     def get_coords(self, entities, exceptions = ()):
         """

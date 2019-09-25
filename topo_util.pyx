@@ -4,6 +4,7 @@ from cython.operator cimport dereference as deref
 cimport numpy as np
 import numpy as np
 from pymoab cimport eh
+from .tag cimport Tag, _tagArray
 from .rng cimport Range
 from .core cimport Core
 from .types import check_error, _eh_array
@@ -81,6 +82,8 @@ cdef class MeshTopoUtil(object):
                                from_ent,
                                int bridge_dim,
                                int to_dim,
+                               Core mb,
+                               Tag tag_handle,
                                exceptions = ()):
         cdef moab.ErrorCode err
         cdef moab.EntityHandle ms_handle
@@ -88,6 +91,7 @@ cdef class MeshTopoUtil(object):
         cdef int npinput = 0
         cdef int idx_count = 0
         cdef vector[eh.EntityHandle] rangeList
+        cdef np.ndarray[np.int32_t] tag_array
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
         cdef eh.EntityHandle element
         cdef int siz
@@ -113,12 +117,13 @@ cdef class MeshTopoUtil(object):
             err = self.inst.get_bridge_adjacencies(r[i], bridge_dim, to_dim, deref(adjs.inst))
           check_error(err, exceptions)
           sizj = adjs.size()
+          tag_array = mb.tag_get_data(tag_handle, adjs, flat=True)
           for j in range(sizj):
-            rangeList.push_back(adjs[j])
+            rangeList.push_back(tag_array[j])
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
-        return np.delete(np.array(np.split(np.array(rangeList, dtype = np.uint64), idx_array)), -1)
+        return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
 
 
 
