@@ -187,6 +187,7 @@ cdef class Range(object):
         cdef int i
         cdef moab.EntityHandle rtn
         cdef np.ndarray[np.int64_t, ndim = 1] keyArray
+        cdef np.ndarray[np.uint8_t, cast = True, ndim = 1] keyBoolArray
         if isinstance(key, int) or isinstance(key, np.int64):
             return self.get_int_key(key)
         elif isinstance(key, np.uint64):
@@ -202,7 +203,13 @@ cdef class Range(object):
                rtnrng.insert(self.get_int_key(keyitem))
              return rtnrng
         elif isinstance(key, np.ndarray):
-            if key.dtype is not  np.dtype('int64'):
+            if key.dtype is np.dtype('bool'):
+              keyBoolArray = key
+              for i in range(keyBoolArray.size):
+                if keyBoolArray[i]:
+                  rtnrng.insert(deref(self.inst)[i])
+              return rtnrng
+            elif key.dtype is not  np.dtype('int64'):
               raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
             keyArray = key
             for i in range(keyArray.size):
@@ -221,9 +228,12 @@ cdef class Range(object):
       cdef rtnrng = Range()
       cdef int i
       cdef moab.EntityHandle rtn
-      cdef np.ndarray[np.int64_t, ndim = 1] keyArray
+      cdef np.ndarray[np.uint64_t, ndim = 1] keyArray
       if key is None:
-          return np.asarray(self)
+          keyArray = np.empty(self.size(), dtype = np.uint64)
+          for i in range(self.size()):
+            keyArray[i] = deref(self.inst)[i]
+          return keyArray
       if isinstance(key, int):
           return np.array(self.get_int_key(key))
       elif isinstance(key, slice):
