@@ -1099,22 +1099,33 @@ cdef class Core(object):
         cdef moab.ErrorCode err
         cdef moab.EntityHandle ms_handle
         cdef Range r
-        cdef int idx_count = 0
-        cdef vector[eh.EntityHandle] rangeList
-        cdef np.ndarray[np.int32_t] tag_array
-        if isinstance(from_ent, Range):
-            r = from_ent
-        else:
-            r = Range(from_ent)
         cdef Range adjs = Range()
         cdef Range inR = Range()
         cdef int i
         cdef int j
         cdef int sizj
-        cdef int siz = r.size()
+        cdef int siz
+        cdef int idx_count = 0
+        cdef int npinput = 0
+        cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
+        cdef vector[eh.EntityHandle] rangeList
+        cdef np.ndarray[np.int32_t] tag_array
+        if isinstance(from_ent, Range):
+            r = from_ent
+        elif isinstance(from_ent, np.ndarray):
+            inputArray = from_ent
+            npinput=1
+            siz = inputArray.size
+        else:
+            r = Range(from_ent)
+        if not npinput:
+          siz = r.size()
         cdef np.ndarray[np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
         for i in range(siz):
-          inR.insert(r[i])
+          if npinput:
+            inR.insert(inputArray[i])
+          else:
+            inR.insert(r[i])
           err = self.inst.get_adjacencies(deref(inR.inst), to_dim, create_if_missing, deref(adjs.inst), op_type)
           inR.pop_front()
           check_error(err, exceptions)
@@ -1412,7 +1423,7 @@ cdef class Core(object):
 
         return np.asarray(ehs_out, dtype = np.uint64)
 
-    def get_ord_connectivity(self, entity_handles, Tag tag_handle, exceptions = ()):
+    def get_ord_connectivity(self, entity_handles, Tag tag_handle = None, bint tag_opt = True, exceptions = ()):
         """
         Returns the vertex handles which make up the mesh entities passed in via
         the entity_handles argument.
@@ -1476,7 +1487,10 @@ cdef class Core(object):
           typej = self.inst.type_from_handle(<unsigned long> ehs[i])
           idx_count = idx_count + sizenum[typej]
           idx_array[i] = idx_count
-        tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
+        if not tag_opt:
+          return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)
+        else:
+          tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
         return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)
 
     def get_coords(self, entities, exceptions = ()):

@@ -4,6 +4,7 @@ from cython.operator cimport dereference as deref
 cimport numpy as np
 import numpy as np
 from pymoab cimport eh
+from pymoab import rng
 from .tag cimport Tag, _tagArray
 from .rng cimport Range
 from .core cimport Core
@@ -84,6 +85,8 @@ cdef class MeshTopoUtil(object):
                                int to_dim,
                                Core mb,
                                Tag tag_handle,
+                               all_ents = None,
+                               int level = 0,
                                exceptions = ()):
         cdef moab.ErrorCode err
         cdef moab.EntityHandle ms_handle
@@ -116,10 +119,13 @@ cdef class MeshTopoUtil(object):
           else:
             err = self.inst.get_bridge_adjacencies(r[i], bridge_dim, to_dim, deref(adjs.inst))
           check_error(err, exceptions)
+          if level:
+            adjs = rng.intersect(adjs, all_ents)
           sizj = adjs.size()
           tag_array = mb.tag_get_data(tag_handle, adjs, flat=True)
           for j in range(sizj):
             rangeList.push_back(tag_array[j])
+
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
