@@ -135,6 +135,10 @@ cdef class MeshTopoUtil(object):
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
+        if siz==1:
+          if jagged:
+            return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)[0]
+          return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))[0]
         if jagged:
           return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
         return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))

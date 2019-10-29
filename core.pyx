@@ -1143,6 +1143,10 @@ cdef class Core(object):
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
+        if siz==1:
+          if jagged:
+            return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)[0]
+          return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))[0]
         if jagged:
           return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
         return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))
@@ -1504,15 +1508,25 @@ cdef class Core(object):
               jagged = 1
           idx_count = idx_count + sizenum[typej]
           idx_array[i] = idx_count
+        if siz>1:
+          if not tag_opt:
+            if jagged:
+              return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)
+            return np.array(ehs_out, dtype = np.uint64).reshape((-1, default_size))
+          else:
+            tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
+            if jagged:
+              return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)
+            return tag_array.astype(np.int64).reshape((-1, default_size))
         if not tag_opt:
           if jagged:
-            return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)
-          return np.array(ehs_out, dtype = np.uint64).reshape((-1, default_size))
+            return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)[0]
+          return np.array(ehs_out, dtype = np.uint64).reshape((-1, default_size))[0]
         else:
           tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
           if jagged:
-            return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)
-          return tag_array.astype(np.int64).reshape((-1, default_size))
+            return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)[0]
+          return tag_array.astype(np.int64).reshape((-1, default_size))[0]
 
     def get_coords(self, entities, exceptions = ()):
         """
