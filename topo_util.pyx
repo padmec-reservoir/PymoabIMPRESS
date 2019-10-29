@@ -93,6 +93,8 @@ cdef class MeshTopoUtil(object):
         cdef Range r
         cdef int npinput = 0
         cdef int idx_count = 0
+        cdef bint jagged = 0
+        cdef int default_size = 0
         cdef vector[eh.EntityHandle] rangeList
         cdef np.ndarray[np.int32_t] tag_array
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
@@ -125,11 +127,17 @@ cdef class MeshTopoUtil(object):
           tag_array = mb.tag_get_data(tag_handle, adjs, flat=True)
           for j in range(sizj):
             rangeList.push_back(tag_array[j])
-
+          if not jagged:
+            if default_size==0:
+              default_size = sizj
+            elif default_size != sizj:
+              jagged = 1
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
-        return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
+        if jagged:
+          return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
+        return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))
 
 
 
