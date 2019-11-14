@@ -186,9 +186,10 @@ cdef class Range(object):
         cdef rtnrng = Range()
         cdef int i
         cdef moab.EntityHandle rtn
-        cdef np.ndarray[np.int64_t, ndim = 1] keyArray
+        cdef np.ndarray[np.int64_t, ndim = 1] keyArray64
+        cdef np.ndarray[np.int32_t, ndim = 1] keyArray32
         cdef np.ndarray[np.uint8_t, cast = True, ndim = 1] keyBoolArray
-        if isinstance(key, int) or isinstance(key, np.int64):
+        if isinstance(key, int) or isinstance(key, np.int64) or isinstance(key, np.int32):
             return self.get_int_key(key)
         elif isinstance(key, np.uint64):
             return Range(key)
@@ -209,12 +210,17 @@ cdef class Range(object):
                 if keyBoolArray[i]:
                   rtnrng.insert(deref(self.inst)[i])
               return rtnrng
-            elif key.dtype is not  np.dtype('int64'):
-              raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
-            keyArray = key
-            for i in range(keyArray.size):
-              rtnrng.insert(deref(self.inst)[keyArray[i]])
-            return rtnrng
+            elif key.dtype is np.dtype('int64'):
+              keyArray64 = key
+              for i in range(keyArray64.size):
+                rtnrng.insert(deref(self.inst)[keyArray64[i]])
+              return rtnrng
+            elif key.dtype is np.dtype('int32'):
+              keyArray32 = key
+              for i in range(keyArray32.size):
+                rtnrng.insert(deref(self.inst)[keyArray32[i]])
+              return rtnrng
+            raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
         elif isinstance(key, Range):
             return key
         else:
@@ -227,7 +233,8 @@ cdef class Range(object):
       cdef int i=0
       cdef int j=0
       cdef np.ndarray[np.uint64_t, ndim = 1] retArray
-      cdef np.ndarray[np.int64_t, ndim = 1] keyArray
+      cdef np.ndarray[np.int64_t, ndim = 1] keyArray64
+      cdef np.ndarray[np.int32_t, ndim = 1] keyArray32
       cdef np.ndarray[np.uint8_t, cast = True, ndim = 1] keyBoolArray
       if key is None:
           retArray = np.empty(self.size(), dtype = np.uint64)
@@ -235,13 +242,18 @@ cdef class Range(object):
             retArray[i] = deref(self.inst)[i]
           return retArray
       elif isinstance(key, np.ndarray):
-          if key.dtype not in [np.dtype('int64'), np.dtype('bool')]:
+          if key.dtype not in [np.dtype('int32'), np.dtype('int64'), np.dtype('bool')]:
             raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
           retArray = np.empty(key.size, dtype = np.uint64)
-          if key.dtype is np.dtype('int64'):
-            keyArray = key
-            for i in range(keyArray.size):
-              retArray[i] = deref(self.inst)[keyArray[i]]
+          if key.dtype is np.dtype('int32'):
+            keyArray32 = key
+            for i in range(keyArray32.size):
+              retArray[i] = deref(self.inst)[keyArray32[i]]
+            return retArray
+          elif key.dtype is np.dtype('int64'):
+            keyArray64 = key
+            for i in range(keyArray64.size):
+              retArray[i] = deref(self.inst)[keyArray64[i]]
             return retArray
           keyBoolArray = key
           for i in range(keyBoolArray.size):
