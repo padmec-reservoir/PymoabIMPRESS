@@ -62,6 +62,19 @@ cdef class Range(object):
         else:
             raise ValueError("Not a valid argument to Range constructor.")
 
+    def __getstate__(self):
+        """
+        Pickle this range
+        """
+        return self.get_array()
+
+    def __setstate__(self, state):
+        """
+        Unpickle this range
+        """
+        self.inst = new moab.Range()
+        for eh in state:
+          self.inst.insert(eh)
 
     def __del__(self):
         """
@@ -179,10 +192,12 @@ cdef class Range(object):
             return _eh_py_type(rtn)
         else:
             raise StopIteration
+
     def __getitem__(self, key):
         """
         Index operator.
         """
+
         cdef rtnrng = Range()
         cdef int i
         cdef moab.EntityHandle rtn
@@ -194,11 +209,17 @@ cdef class Range(object):
         elif isinstance(key, np.uint64):
             return Range(key)
         elif isinstance(key, slice):
-            step = key.step if key.step is not None else 1
-            start = key.start if key.start is not None else 0
-            stop = key.stop if key.stop is not None else len(self)
-            ents = list(self)[start:stop:step]
-            return Range(ents)
+            if key.start == None and key.stop == None:
+              return self
+            if key.start == None:
+              return self.__getitem__(np.arange(0, key.stop, key.step, dtype = np.int64))
+            if key.stop == None:
+              return self.__getitem__(np.arange(key.start, self.size(), key.step, dtype = np.int64))
+            return self.__getitem__(np.arange(key.start, key.stop, key.step, dtype = np.int64))
+            # step = key.step if key.step is not None else 1
+            # start = key.start if key.start is not None else 0
+            # stop = key.stop if key.stop is not None else len(self)
+            # ents = list(self)[start:stop:step]
         elif isinstance(key, list):
              for keyitem in key:
                rtnrng.insert(self.get_int_key(keyitem))
@@ -223,6 +244,8 @@ cdef class Range(object):
             raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
         elif isinstance(key, Range):
             return key
+        elif key == None:
+            return self
         else:
             raise ValueError("Invalid key (type: {}) provided.".format(type(key)))
 
@@ -261,9 +284,16 @@ cdef class Range(object):
               retArray[j] = deref(self.inst)[i]
               j = j+1
           return retArray[:j]
-
+      elif isinstance(key, slice):
+          if key.start == None and key.stop == None:
+            return self.get_array()
+          if key.start == None:
+            return self.get_array(np.arange(0, key.stop, key.step, dtype = np.int64))
+          if key.stop == None:
+            return self.get_array(np.arange(key.start, self.size(), key.step, dtype = np.int64))
+          return self.get_array(np.arange(key.start, key.stop, key.step, dtype = np.int64))
       else:
-          raise ValueError("Key of invalid type provided.")
+          return self.__getitem__(key).get_array()
 
 
     def __richcmp__(self, other, op):
