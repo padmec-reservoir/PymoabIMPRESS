@@ -83,8 +83,8 @@ cdef class MeshTopoUtil(object):
                                from_ent,
                                int bridge_dim,
                                int to_dim,
-                               Core mb,
-                               Tag tag_handle,
+                               Core mb = None,
+                               Tag tag_handle = None,
                                all_ents = None,
                                int level = 0,
                                exceptions = ()):
@@ -96,7 +96,8 @@ cdef class MeshTopoUtil(object):
         cdef bint jagged = 0
         cdef int default_size = 0
         cdef vector[eh.EntityHandle] rangeList
-        cdef np.ndarray[np.int32_t] tag_array
+        cdef np.ndarray[np.int64_t] tag_array
+        cdef np.ndarray[np.uint64_t] handle_array
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
         cdef eh.EntityHandle element
         cdef int siz
@@ -114,6 +115,9 @@ cdef class MeshTopoUtil(object):
         cdef int i
         cdef int j
         cdef int sizj
+        cdef bint tag_opt = False
+        if tag_handle is not None:
+          tag_opt = True
         cdef np.ndarray[dtype = np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
         for i in range(siz):
           if npinput:
@@ -124,9 +128,14 @@ cdef class MeshTopoUtil(object):
           if level:
             adjs = rng.intersect(adjs, all_ents)
           sizj = adjs.size()
-          tag_array = mb.tag_get_data(tag_handle, adjs, flat=True)
-          for j in range(sizj):
-            rangeList.push_back(tag_array[j])
+          if tag_opt:
+            tag_array = mb.tag_get_data(tag_handle, adjs, flat=True).astype(np.int64)
+            for j in range(sizj):
+              rangeList.push_back(tag_array[j])
+          else:
+            handle_array = adjs.get_array()
+            for j in range(sizj):
+              rangeList.push_back(handle_array[j])
           if not jagged:
             if default_size==0:
               default_size = sizj
@@ -137,13 +146,11 @@ cdef class MeshTopoUtil(object):
           adjs.clear()
         if siz==1:
           if jagged:
-            return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)[0]
-          return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))[0]
+            return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)[0]
+          return np.array(rangeList).reshape((-1, default_size))[0]
         if jagged:
-          return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
-        return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))
-
-
+          return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)
+        return np.array(rangeList).reshape((-1, default_size))
 
     def get_average_position(self,
                              entity_handles,

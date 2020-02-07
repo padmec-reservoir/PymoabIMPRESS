@@ -1,10 +1,8 @@
 """Implements core functionality."""
 from cython.operator cimport dereference as deref
-
 cimport numpy as np
 import numpy as np
 import ctypes
-
 from pymoab cimport moab
 from pymoab cimport eh
 
@@ -1094,7 +1092,7 @@ cdef class Core(object):
         check_error(err, exceptions)
         return adj
 
-    def get_ord_adjacencies(self, from_ent, int to_dim, Tag tag_handle, bint create_if_missing = False, int op_type = types.INTERSECT, exceptions = ()):
+    def get_ord_adjacencies(self, from_ent, int to_dim, Tag tag_handle = None, bint create_if_missing = False, int op_type = types.INTERSECT, exceptions = ()):
 
         cdef moab.ErrorCode err
         cdef moab.EntityHandle ms_handle
@@ -1109,9 +1107,11 @@ cdef class Core(object):
         cdef bint jagged = 0
         cdef int default_size = 0
         cdef int npinput = 0
+        cdef bint tag_opt = False
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
         cdef vector[eh.EntityHandle] rangeList
         cdef np.ndarray[np.int32_t] tag_array
+        cdef np.ndarray[np.uint64_t] handle_array
         if isinstance(from_ent, Range):
             r = from_ent
         elif isinstance(from_ent, np.ndarray):
@@ -1123,6 +1123,8 @@ cdef class Core(object):
         if not npinput:
           siz = r.size()
         cdef np.ndarray[np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
+        if tag_handle is not None:
+          tag_opt = True
         for i in range(siz):
           if npinput:
             inR.insert(inputArray[i])
@@ -1132,9 +1134,14 @@ cdef class Core(object):
           inR.pop_front()
           check_error(err, exceptions)
           sizj = adjs.size()
-          tag_array = self.tag_get_data(tag_handle, adjs, flat=True)
-          for j in range(sizj):
-            rangeList.push_back(tag_array[j])
+          if tag_opt:
+            tag_array = self.tag_get_data(tag_handle, adjs, flat=True).astype(np.int64)
+            for j in range(sizj):
+              rangeList.push_back(tag_array[j])
+          else:
+            handle_array = adjs.get_array()
+            for j in range(sizj):
+              rangeList.push_back(handle_array[j])
           if not jagged:
             if default_size==0:
               default_size = sizj
@@ -1145,11 +1152,11 @@ cdef class Core(object):
           adjs.clear()
         if siz==1:
           if jagged:
-            return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)[0]
-          return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))[0]
+            return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)[0]
+          return np.array(rangeList).reshape((-1, default_size))[0]
         if jagged:
-          return np.delete(np.array(np.split(np.array(rangeList, dtype = np.int64), idx_array)), -1)
-        return np.array(rangeList, dtype = np.int64).reshape((-1, default_size))
+          return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)
+        return np.array(rangeList).reshape((-1, default_size))
 
 
     def type_from_handle(self, entity_handle):
@@ -1984,95 +1991,141 @@ cdef class Core(object):
             tag_list.append(t)
         return tag_list
 
-    def point_in_volumes(self, volume_handle, points_handles):
+
+#para cada volume fino i:
+#    para cada volume adjacente k de i:
+#         para cada volume da malha coarse j:
+
+
+    def check_intersection(self, vol_ind, all_v_adj):
+        cdef bint other_owner = False
+        cdef int i, j, k, l, vol, neighbour
+        cdef np.ndarray [np.uint8_t, cast = True, ndim = 2] volumes_indicator = vol_ind
+        cdef np.ndarray [np.uint8_t, ndim = 2] scores
+        cdef np.ndarray [np.int32_t, ndim = 1] owners = np.zeros(volumes_indicator.shape[0], np.int32) - 1
+        cdef int sum = volumes_indicator.shape[0]+1
+        cdef int new_sum = sum+1
+        cdef np.ndarray [np.uint8_t, ndim = 1] internal_vol_bin = np.zeros(volumes_indicator.shape[0], dtype = np.uint8)
+        cdef np.ndarray [np.int64_t, ndim = 1] internal_vol
+        cdef np.ndarray [np.int64_t, ndim = 1] all_vol_adj = np.concatenate(all_v_adj)
+        cdef np.ndarray [np.int32_t, ndim = 1] all_vol_adj_index = np.array([all_v_adj[i].size for i in range(all_v_adj.shape[0])], dtype = np.int32)
+        all_vol_adj_index = np.cumsum(np.concatenate((np.array([0], dtype = np.int32), all_vol_adj_index)), dtype = np.int32)
+        for i in range(internal_vol_bin.size):    #descobre quais volumes so tem um dono
+          if volumes_indicator[i].sum() == 1:
+            internal_vol_bin[i] = 1
+            owners[i] = volumes_indicator[i].nonzero()[0][0]
+        while sum > volumes_indicator.shape[0]:   #enquanto existirem volumes com mais de 1 dono
+          scores = np.zeros((volumes_indicator.shape[0], volumes_indicator.shape[1]), dtype = np.uint8)
+          internal_vol = internal_vol_bin.nonzero()[0]
+          for vol in internal_vol:                #para cada volume com só 1 dono, observa os volumes vizinhos com mais de 1 dono
+            for k in range(all_vol_adj_index[vol], all_vol_adj_index[vol+1]):
+              neighbour = all_vol_adj[k]
+              if internal_vol_bin[neighbour] == 0:
+                if other_owner:
+                  scores[neighbour][owners[vol]] = scores[neighbour][owners[vol]] + 1
+                elif volumes_indicator[neighbour][owners[vol]]:
+                  scores[neighbour][owners[vol]] = scores[neighbour][owners[vol]] + 1
+          for i in range(internal_vol_bin.size):
+            if internal_vol_bin[i] == 0:
+              if scores[i].sum()>0:
+                owners[i] = np.argmax(scores[i])
+                internal_vol_bin[i] = 1
+                volumes_indicator[i] = False
+                volumes_indicator[i][owners[i]] = True
+          sum = volumes_indicator.sum()
+          if new_sum == sum:
+            other_owner = True
+          else:
+            new_sum = sum
+          print('sum :', sum)
+        return volumes_indicator
+
+    def point_in_volumes(self, vol_p_c, face_idx, p_coords, float tol = 0):
         cdef int i=0
         cdef int j=0
+        cdef int k=0
+        cdef int pts_count=0
         cdef bint outBox = False
-        cdef Range Faces
         cdef int countOut=0
+        cdef np.ndarray [np.float64_t, ndim = 2] vol_points_coords = vol_p_c
+        cdef np.ndarray [np.int64_t, ndim = 2] faces_index = face_idx
+        cdef np.ndarray [np.float64_t, ndim = 2] points_coords = p_coords
         cdef np.ndarray [np.float64_t, ndim = 2] lim = np.empty((3,2), dtype = np.float64) #linha: x/y/z #coluna: min/max
-        cdef np.ndarray [np.uint64_t, ndim = 1] vol_points
-        cdef np.ndarray [np.uint64_t, ndim = 1] points = points_handles
-        cdef np.ndarray [np.float64_t, ndim = 2] vol_points_coords
-        cdef np.ndarray [np.float64_t, ndim = 2] face_points_coords
-        cdef np.ndarray [np.float64_t, ndim = 2] faces_centers
-        cdef np.ndarray [np.float64_t, ndim = 2] points_coords
+        cdef np.ndarray [np.uint8_t, cast = True, ndim = 1] retStatus = np.ones(dtype = np.uint8, shape = points_coords.shape[0])
+        cdef np.ndarray [np.float64_t, ndim = 2] faces_centers = np.empty((faces_index.shape[0], 3), dtype = np.float64)
         cdef np.ndarray [np.float64_t, ndim = 1] average_point
-        cdef np.ndarray [np.float64_t, ndim = 3] faces_3points_coords
-        cdef np.ndarray[np.uint8_t, cast = True, ndim = 1] retStatus = np.ones(dtype = np.uint8, shape = points_handles.size)
-        print('aaaaaaaaa')
-        vol_points = self.get_connectivity(volume_handle)
-        vol_points_coords = np.reshape(self.get_coords(vol_points), (-1,3))
-        points_coords = np.reshape(self.get_coords(points), (-1,3))
-        for i in range(3): #inicializa valores min/max
+        cdef np.ndarray [np.float64_t, ndim = 1] vol_center
+        cdef np.ndarray [np.float64_t, ndim = 2] faces_normal = np.empty((faces_index.shape[0], 3),dtype = np.float64)
+        cdef np.ndarray [np.float64_t, ndim = 1] v1_aux = np.empty(3, dtype=np.float64)
+        cdef np.ndarray [np.float64_t, ndim = 1] v2_aux = np.empty(3, dtype=np.float64)
+        #inicializa valores min/max
+        for i in range(3):
           lim[i][0] = vol_points_coords[0][i]
           lim[i][1] = vol_points_coords[0][i]
-        for i in range(1, vol_points.size): #encontra valores min/max
+        #encontra valores min/max
+        for i in range(1,vol_points_coords.shape[0]):
           for j in range(3):
             if(vol_points_coords[i][j] < lim[j][0]):
               lim[j][0] = vol_points_coords[i][j]
             elif(vol_points_coords[i][j] > lim[j][1]):
               lim[j][1] = vol_points_coords[i][j]
-        for i in range(points.size): #checa pontos fora da boundingbox
+        #checa pontos fora da boundingbox
+        for i in range(points_coords.shape[0]):
           for j in range(3):
             outBox = outBox or (points_coords[i][j] < lim[j][0] or points_coords[i][j] > lim[j][1])
           if outBox:
             retStatus[i]=0
             countOut = countOut+1
             outBox=False
-        if countOut == retStatus.size: #todos os pontos estao fora
+        #retorna todos os pontos estao fora
+        if countOut == retStatus.size:
+          print('All points are out of the boundingbox')
           return retStatus
-        Faces = self.get_adjacencies(volume_handle, 2) #faces do volume
-        faces_centers = np.empty((Faces.size(), 3), dtype = np.float64)
-        faces_3points_coords = np.empty((Faces.size(), 3, 3), dtype = np.float64)
-        for i in range(Faces.size()):
-          face_points_coords = np.reshape(self.get_coords(self.get_connectivity(Faces[i])), (-1,3))
-          average_point = np.zeros(3, dtype = np.float64)
-          for j in range(face_points_coords.shape[0]): #calcula pontos medios das faces
-            average_point[0] = average_point[0] + face_points_coords[j][0]
-            average_point[1] = average_point[1] + face_points_coords[j][1]
-            average_point[2] = average_point[2] + face_points_coords[j][2]
-          average_point = average_point/face_points_coords.shape[0]
-          faces_centers[i] = average_point
-          faces_3points_coords[i] = face_points_coords[0:3]
         #calcula ponto medio do volume
         average_point = np.zeros(3, dtype = np.float64)
-        for i in range(vol_points_coords.shape[0]): #calcula ponto medio do volume
-          average_point[0] = average_point[0] + face_points_coords[j][0]
-          average_point[1] = average_point[1] + face_points_coords[j][1]
-          average_point[2] = average_point[2] + face_points_coords[j][2]
-        average_point = average_point/vol_points_coords.shape[0]
-        return self.checkInVolume(faces_centers, faces_3points_coords, points_coords, average_point, retStatus)
-
-    def checkInVolume(self, np.ndarray [np.float64_t, ndim = 2] faces_centers, np.ndarray [np.float64_t, ndim = 3] faces_3points_coords, np.ndarray [np.float64_t, ndim = 2] points_coords, np.ndarray [np.float64_t, ndim = 1]  vol_center, np.ndarray[np.uint8_t, cast = True, ndim = 1] retStatus):
-        cdef int i
-        cdef int j
-        cdef int k
-        cdef float prod
-        cdef np.ndarray [np.float64_t, ndim = 1] v1_aux = np.empty(3, dtype=np.float64)
-        cdef np.ndarray [np.float64_t, ndim = 1] v2_aux = np.empty(3, dtype=np.float64)
-        cdef np.ndarray [np.float64_t, ndim = 2] faces_normal = np.empty((faces_centers.shape[0], 3), dtype = np.float64)
-        for i in range(faces_3points_coords.shape[0]): #calcula vetores normais das faces
+        for j in range(vol_points_coords.shape[0]):
+          average_point[0] = average_point[0] + vol_points_coords[j][0]
+          average_point[1] = average_point[1] + vol_points_coords[j][1]
+          average_point[2] = average_point[2] + vol_points_coords[j][2]
+        vol_center = average_point/vol_points_coords.shape[0]
+        #calcula pontos medios e vetores normais das faces
+        for i in range(faces_index.shape[0]):
+          average_point = np.zeros(3, dtype = np.float64)
+          #calculo do ponto medio
+          pts_count = 0
+          for j in range(faces_index[i].size):
+            if faces_index[i][j]<0:
+              break
+            pts_count=pts_count+1
+            average_point[0] = average_point[0] + vol_points_coords[faces_index[i][j]][0]
+            average_point[1] = average_point[1] + vol_points_coords[faces_index[i][j]][1]
+            average_point[2] = average_point[2] + vol_points_coords[faces_index[i][j]][2]
+          average_point = average_point/pts_count
           for j in range(3):
-            v1_aux[j]=faces_3points_coords[i][1][j]-faces_3points_coords[i][0][j]
-            v2_aux[j]=faces_3points_coords[i][2][j]-faces_3points_coords[i][0][j]
+            faces_centers[i][j] = average_point[j]
+          #calculo do vetor normal
+          for j in range(3):
+            v1_aux[j]=vol_points_coords[faces_index[i][1]][j]-vol_points_coords[faces_index[i][0]][j]
+            v2_aux[j]=vol_points_coords[faces_index[i][2]][j]-vol_points_coords[faces_index[i][0]][j]
           faces_normal[i]=np.cross(v1_aux, v2_aux)
+          #checa se vetor normal esta apontando para fora
           for j in range(3):
             v1_aux[j]=faces_centers[i][j]-vol_center[j]
-          if (v1_aux[0]*faces_normal[i][0]+v1_aux[1]*faces_normal[i][1]+v1_aux[2]*faces_normal[i][2] < 0 ): #checa se ele ta apontando pra fora
+          if (v1_aux[0]*faces_normal[i][0]+v1_aux[1]*faces_normal[i][1]+v1_aux[2]*faces_normal[i][2] < 0 ):
             for j in range(3):
               faces_normal[i][j] = -faces_normal[i][j]
-        for i in range(points_coords.shape[0]): #calcula produto interno
-          print(i)
+
+        #decide se cada ponto esta dentro (1), na face (2), ou fora (0)
+        for i in range(points_coords.shape[0]):
           if(retStatus[i]):
             for j in range(faces_centers.shape[0]):
               for k in range(3):
-                v1_aux[k] = faces_centers[j][k]-points_coords[i][k]
+                v1_aux[k] = points_coords[i][k]-faces_centers[j][k]
               prod = v1_aux[0]*faces_normal[j][0]+v1_aux[1]*faces_normal[j][1]+v1_aux[2]*faces_normal[j][2]
-              if(prod < 0):
+              if(prod > tol):
                 retStatus[i]=0
                 break
-              elif(prod==0):
+              elif(prod>=0):
                 retStatus[i]=2
                 break
         return retStatus
