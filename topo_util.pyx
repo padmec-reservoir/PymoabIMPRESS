@@ -1,4 +1,5 @@
 """ MOAB MeshTopoUtil """
+# cython: boundscheck=False
 from cython.operator cimport dereference as deref
 
 cimport numpy as np

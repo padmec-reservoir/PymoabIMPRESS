@@ -1,4 +1,5 @@
 """Implements range functionality."""
+# cython: boundscheck=False
 from cython.operator cimport dereference as deref
 from pymoab cimport moab, eh
 from .types import _eh_array, _eh_py_type

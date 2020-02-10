@@ -1,4 +1,5 @@
 """Implements core functionality."""
+# cython: boundscheck=False
 from cython.operator cimport dereference as deref
 cimport numpy as np
 import numpy as np
@@ -1992,9 +1993,32 @@ cdef class Core(object):
         return tag_list
 
 
-#para cada volume fino i:
-#    para cada volume adjacente k de i:
-#         para cada volume da malha coarse j:
+    def get_interface_faces(self, con, par, inter):
+      
+        cdef vector[int] *stack
+        cdef np.ndarray[np.uint16_t, ndim = 3] connectivities = con
+        cdef np.ndarray[np.int32_t, ndim = 2] parts = par
+        cdef np.ndarray[np.uint64_t, ndim = 1] interface_faces = inter
+        cdef int i, j
+        cdef int size_faces
+        cdef int iface_number = 0
+        print('etapa 1')
+        for i in range(parts.shape[0]):
+          if not connectivities[parts[i][0]][parts[i][1]][0]:
+            connectivities[parts[i][0]][parts[i][1]][0] = iface_number
+            connectivities[parts[i][1]][parts[i][0]][0] = iface_number
+            iface_number += 1
+        print('etapa 2')
+        listRanges = [Range() for i in range(iface_number)]
+        for i in range(parts.shape[0]):
+          listRanges[connectivities[parts[i][0]][parts[i][1]][0]].insert(interface_faces[i])
+        return listRanges
+
+    def test(self, int n):
+        cdef vector[int] *stack
+        stack = < vector[int] *> malloc(sizeof(vector[int])*n)
+        stack[1].push_back(5)
+        print(stack[1][0])
 
 
     def check_intersection(self, vol_ind, all_v_adj):
