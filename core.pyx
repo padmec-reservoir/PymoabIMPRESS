@@ -1993,26 +1993,42 @@ cdef class Core(object):
         return tag_list
 
 
-    def get_interface_faces(self, con, par, inter):
-      
+    def get_interface_faces(self, con, par, inter, bound, bound_par, num_c, fac_vec):
+
         cdef vector[int] *stack
+        cdef np.ndarray[np.int16_t, ndim = 2] faces_neigh = fac_vec
         cdef np.ndarray[np.uint16_t, ndim = 3] connectivities = con
         cdef np.ndarray[np.int32_t, ndim = 2] parts = par
         cdef np.ndarray[np.uint64_t, ndim = 1] interface_faces = inter
-        cdef int i, j
+        cdef np.ndarray[np.int32_t, ndim = 1] boundary_parts = bound_par
+        cdef np.ndarray[np.uint64_t, ndim = 1] boundary_faces = bound
+        cdef int i
         cdef int size_faces
-        cdef int iface_number = 0
+        cdef num_internal
+        cdef int iface_number = 1
         print('etapa 1')
+        cdef int num_coarse = num_c
         for i in range(parts.shape[0]):
           if not connectivities[parts[i][0]][parts[i][1]][0]:
             connectivities[parts[i][0]][parts[i][1]][0] = iface_number
             connectivities[parts[i][1]][parts[i][0]][0] = iface_number
+            fac_vec[parts[i][0]][parts[i][1]] = iface_number- 1
+            fac_vec[parts[i][1]][parts[i][0]]= iface_number- 1
             iface_number += 1
+        num_internal = iface_number - 1
+        for i in range(boundary_parts.size):
+            if not connectivities[boundary_parts[i]][num_coarse][0]:
+              connectivities[boundary_parts[i]][num_coarse][0] = iface_number
+              fac_vec[boundary_parts[i]][num_coarse] = iface_number- 1
+              iface_number += 1
         print('etapa 2')
         listRanges = [Range() for i in range(iface_number)]
         for i in range(parts.shape[0]):
           listRanges[connectivities[parts[i][0]][parts[i][1]][0]].insert(interface_faces[i])
-        return listRanges
+        for i in range(boundary_parts.size):
+          listRanges[connectivities[boundary_parts[i]][num_coarse][0]].insert(boundary_faces[i])
+
+        return listRanges[1:], num_internal
 
     def test(self, int n):
         cdef vector[int] *stack
