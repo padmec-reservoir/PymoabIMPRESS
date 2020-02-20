@@ -1995,7 +1995,6 @@ cdef class Core(object):
 
     def get_interface_faces(self, con, par, inter, bound, bound_par, num_c, fac_vec):
 
-        cdef vector[int] *stack
         cdef np.ndarray[np.int16_t, ndim = 2] faces_neigh = fac_vec
         cdef np.ndarray[np.uint16_t, ndim = 3] connectivities = con
         cdef np.ndarray[np.int32_t, ndim = 2] parts = par
@@ -2003,38 +2002,85 @@ cdef class Core(object):
         cdef np.ndarray[np.int32_t, ndim = 1] boundary_parts = bound_par
         cdef np.ndarray[np.uint64_t, ndim = 1] boundary_faces = bound
         cdef int i
-        cdef int size_faces
         cdef num_internal
         cdef int iface_number = 1
         print('etapa 1')
         cdef int num_coarse = num_c
         for i in range(parts.shape[0]):
-          if not connectivities[parts[i][0]][parts[i][1]][0]:
-            connectivities[parts[i][0]][parts[i][1]][0] = iface_number
-            connectivities[parts[i][1]][parts[i][0]][0] = iface_number
-            fac_vec[parts[i][0]][parts[i][1]] = iface_number- 1
-            fac_vec[parts[i][1]][parts[i][0]]= iface_number- 1
+          if not connectivities[parts[i][0]][parts[i][1]][2]:
+            connectivities[parts[i][0]][parts[i][1]][2] = iface_number
+            connectivities[parts[i][1]][parts[i][0]][2] = iface_number
+            faces_neigh[parts[i][0]][parts[i][1]] = iface_number- 1
+            faces_neigh[parts[i][1]][parts[i][0]]= iface_number- 1
             iface_number += 1
         num_internal = iface_number - 1
         for i in range(boundary_parts.size):
-            if not connectivities[boundary_parts[i]][num_coarse][0]:
-              connectivities[boundary_parts[i]][num_coarse][0] = iface_number
-              fac_vec[boundary_parts[i]][num_coarse] = iface_number- 1
+            if not connectivities[boundary_parts[i]][num_coarse][2]:
+              connectivities[boundary_parts[i]][num_coarse][2] = iface_number
+              faces_neigh[boundary_parts[i]][num_coarse] = iface_number- 1
               iface_number += 1
         print('etapa 2')
         listRanges = [Range() for i in range(iface_number)]
         for i in range(parts.shape[0]):
-          listRanges[connectivities[parts[i][0]][parts[i][1]][0]].insert(interface_faces[i])
+          listRanges[connectivities[parts[i][0]][parts[i][1]][2]].insert(interface_faces[i])
         for i in range(boundary_parts.size):
-          listRanges[connectivities[boundary_parts[i]][num_coarse][0]].insert(boundary_faces[i])
+          listRanges[connectivities[boundary_parts[i]][num_coarse][2]].insert(boundary_faces[i])
 
         return listRanges[1:], num_internal
 
-    def test(self, int n):
-        cdef vector[int] *stack
-        stack = < vector[int] *> malloc(sizeof(vector[int])*n)
-        stack[1].push_back(5)
-        print(stack[1][0])
+    def get_interface_edges(self, con, inter, coarses, indx, bound, bound_parts, num_c, edg_vec):
+
+        cdef np.ndarray[np.int16_t, ndim = 2] edges_neigh = edg_vec
+        cdef np.ndarray[np.uint16_t, ndim = 3] connectivities = con
+        cdef np.ndarray[np.int32_t, ndim = 2] parts = np.concatenate(coarses[~indx]).reshape(-1,2)
+        cdef np.ndarray[np.uint64_t, ndim = 1] interface_edges_1 = inter[~indx]
+        cdef np.ndarray[np.uint64_t, ndim = 1] interface_edges_2 = inter[indx]
+        cdef np.ndarray[np.int32_t, ndim = 1] parts_vec
+        coarse_jagged  = coarses[indx]
+        cdef np.ndarray[np.uint64_t, ndim = 1] boundary_edges = bound
+        cdef int i,j,k
+        cdef int size_faces
+        cdef num_internal
+        cdef int iedge_number = 1
+        print('etapa 1.1')
+        cdef int num_coarse = num_c
+        for i in range(parts.shape[0]):
+          if not connectivities[parts[i][0]][parts[i][1]][1]:
+            connectivities[parts[i][0]][parts[i][1]][1] = iedge_number
+            connectivities[parts[i][1]][parts[i][0]][1] = iedge_number
+            edges_neigh[parts[i][0]][parts[i][1]] = iedge_number- 1
+            edges_neigh[parts[i][1]][parts[i][0]]= iedge_number- 1
+            iedge_number += 1
+
+        listRanges = [Range() for i in range(iedge_number)]
+        for i in range(parts.shape[0]):
+          listRanges[connectivities[parts[i][0]][parts[i][1]][1]].insert(interface_edges_1[i])
+        print('etapa 1.2')
+        for i in range(coarse_jagged.shape[0]):
+          parts_vec =  coarse_jagged[i]
+          for j in range(parts_vec.size):
+            for k in range(parts_vec.size):
+              if j != k:
+                if not connectivities[parts_vec[j]][parts_vec[k]][1]:
+                    connectivities[parts_vec[k]][parts_vec[j]][1] = iedge_number
+                    connectivities[parts_vec[j]][parts_vec[k]][1] = iedge_number
+                    edges_neigh[parts_vec[k]][parts_vec[j]] = iedge_number- 1
+                    edges_neigh[parts_vec[j]][parts_vec[k]] = iedge_number- 1
+                    iedge_number += 1
+                    listRanges.append(Range())
+                listRanges[connectivities[parts_vec[j]][parts_vec[k]][1]].insert(interface_edges_2[i])
+        num_internal = iedge_number - 1
+        print('etapa 1.3')
+        for i in range(bound_parts.shape[0]):
+          parts_vec = bound_parts[i]
+          for j in range(parts_vec.size):
+            if not connectivities[parts_vec[j]][num_coarse][1]:
+              connectivities[parts_vec[j]][num_coarse][1] = iedge_number
+              edges_neigh[parts_vec[j]][num_coarse] = iedge_number- 1
+              iedge_number += 1
+              listRanges.append(Range())
+            listRanges[connectivities[parts_vec[j]][num_coarse][1]].insert(boundary_edges[i])
+        return listRanges[1:], num_internal
 
 
     def check_intersection(self, vol_ind, all_v_adj):
