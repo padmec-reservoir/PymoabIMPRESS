@@ -1111,7 +1111,7 @@ cdef class Core(object):
         cdef bint tag_opt = False
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
         cdef vector[eh.EntityHandle] rangeList
-        cdef np.ndarray[np.int32_t] tag_array
+        cdef np.ndarray[np.int64_t] tag_array
         cdef np.ndarray[np.uint64_t] handle_array
         if isinstance(from_ent, Range):
             r = from_ent
