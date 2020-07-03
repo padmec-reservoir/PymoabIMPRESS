@@ -1093,11 +1093,9 @@ cdef class Core(object):
         check_error(err, exceptions)
         return adj
 
-    def get_ord_adjacencies(self, from_ent, int to_dim, Tag tag_handle = None, bint create_if_missing = False, int op_type = types.INTERSECT, exceptions = ()):
+    def get_ord_adjacencies(self, from_ent, int to_dim, bint create_if_missing = False, int op_type = types.INTERSECT, exceptions = ()):
 
         cdef moab.ErrorCode err
-        cdef moab.EntityHandle ms_handle
-        cdef Range r
         cdef Range adjs = Range()
         cdef Range inR = Range()
         cdef int i
@@ -1107,42 +1105,26 @@ cdef class Core(object):
         cdef int idx_count = 0
         cdef bint jagged = 0
         cdef int default_size = 0
-        cdef int npinput = 0
-        cdef bint tag_opt = False
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
-        cdef vector[eh.EntityHandle] rangeList
-        cdef np.ndarray[np.int64_t] tag_array
-        cdef np.ndarray[np.uint64_t] handle_array
+        cdef vector[eh.EntityHandle] tempVector
+        cdef np.ndarray[np.uint64_t] temp_array
+        cdef np.ndarray[np.int32_t, ndim = 1] idx_array
         if isinstance(from_ent, Range):
-            r = from_ent
+            inputArray = from_ent.get_array()
         elif isinstance(from_ent, np.ndarray):
             inputArray = from_ent
-            npinput=1
-            siz = inputArray.size
         else:
-            r = Range(from_ent)
-        if not npinput:
-          siz = r.size()
-        cdef np.ndarray[np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
-        if tag_handle is not None:
-          tag_opt = True
+            inputArray = np.array(from_ent, dtype = np.uint64)
+        siz = inputArray.size
+        idx_array = np.empty(siz, dtype = np.int32)
         for i in range(siz):
-          if npinput:
-            inR.insert(inputArray[i])
-          else:
-            inR.insert(r[i])
+          inR.insert(inputArray[i])
           err = self.inst.get_adjacencies(deref(inR.inst), to_dim, create_if_missing, deref(adjs.inst), op_type)
           inR.pop_front()
           check_error(err, exceptions)
-          sizj = adjs.size()
-          if tag_opt:
-            tag_array = self.tag_get_data(tag_handle, adjs, flat=True).astype(np.int64)
-            for j in range(sizj):
-              rangeList.push_back(tag_array[j])
-          else:
-            handle_array = adjs.get_array()
-            for j in range(sizj):
-              rangeList.push_back(handle_array[j])
+          temp_array = adjs.get_array()
+          sizj = temp_array.size
+          tempVector.insert(tempVector.end(), <eh.EntityHandle*> temp_array.data, <eh.EntityHandle*> temp_array.data+sizj)
           if not jagged:
             if default_size==0:
               default_size = sizj
@@ -1151,13 +1133,9 @@ cdef class Core(object):
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
-        if siz==1:
-          if jagged:
-            return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)[0]
-          return np.array(rangeList).reshape((-1, default_size))[0]
         if jagged:
-          return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)
-        return np.array(rangeList).reshape((-1, default_size))
+          return np.array(tempVector, dtype=np.uint64), idx_array, jagged
+        return np.array(tempVector, dtype=np.uint64), default_size, jagged
 
 
     def type_from_handle(self, entity_handle):
@@ -1445,7 +1423,7 @@ cdef class Core(object):
 
         return np.asarray(ehs_out, dtype = np.uint64)
 
-    def get_ord_connectivity(self, entity_handles, Tag tag_handle = None, bint tag_opt = True, exceptions = ()):
+    def get_ord_connectivity(self, entity_handles, exceptions = ()):
         """
         Returns the vertex handles which make up the mesh entities passed in via
         the entity_handles argument.
@@ -1487,7 +1465,7 @@ cdef class Core(object):
         """
         cdef moab.ErrorCode err
         cdef np.ndarray[eh.EntityHandle] ehs
-        cdef np.ndarray[np.int32_t] tag_array
+        cdef np.ndarray[np.int32_t] idx_array
         if isinstance(entity_handles, _eh_py_type):
             ehs = _eh_array([entity_handles,])
         elif isinstance(entity_handles, np.ndarray):
@@ -1495,46 +1473,15 @@ cdef class Core(object):
         else:
             ehs = _eh_array(entity_handles)
         cdef vector[eh.EntityHandle] ehs_out
-        cdef eh.EntityHandle* eh_ptr
-        cdef int num_ents = 0
-        cdef int idx_count = 0
-        cdef int typej
-        cdef bint jagged = 0
-        cdef int default_size = 0
+        cdef np.ndarray[np.int32_t] jagged = np.empty(1, dtype = np.int32)
         cdef int siz = ehs.size
-        cdef np.ndarray[dtype = np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
-        cdef np.ndarray[dtype = np.uint8_t] sizenum = np.array([1,2,3,4,0,4,5,0,0,8,0], dtype = np.uint8)
-        err = self.inst.get_connectivity(<eh.EntityHandle*> ehs.data, ehs.size, ehs_out)
+        idx_array = np.empty(siz, dtype = np.int32)
+        err = self.inst.get_connectivity_with_size(<eh.EntityHandle*> ehs.data, ehs.size, ehs_out, <int *> idx_array.data, <int *> jagged.data)
         check_error(err, exceptions)
-        cdef int i
-        for i in range(siz):
-          typej = self.inst.type_from_handle(<unsigned long> ehs[i])
-          if not jagged:
-            if default_size==0:
-              default_size = sizenum[typej]
-            elif default_size != sizenum[typej]:
-              jagged = 1
-          idx_count = idx_count + sizenum[typej]
-          idx_array[i] = idx_count
-        if siz>1:
-          if not tag_opt:
-            if jagged:
-              return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)
-            return np.array(ehs_out, dtype = np.uint64).reshape((-1, default_size))
-          else:
-            tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
-            if jagged:
-              return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)
-            return tag_array.astype(np.int64).reshape((-1, default_size))
-        if not tag_opt:
-          if jagged:
-            return np.delete(np.array(np.split(np.array(ehs_out, dtype = np.uint64), idx_array)), -1)[0]
-          return np.array(ehs_out, dtype = np.uint64).reshape((-1, default_size))[0]
-        else:
-          tag_array = self.tag_get_data(tag_handle, np.array(ehs_out, dtype = np.uint64), flat=True)
-          if jagged:
-            return np.delete(np.array(np.split(tag_array.astype(np.int64), idx_array)), -1)[0]
-          return tag_array.astype(np.int64).reshape((-1, default_size))[0]
+        if jagged[0] == 0:
+          return np.asarray(ehs_out, dtype = np.uint64), idx_array[0], False
+        return  np.asarray(ehs_out, dtype = np.uint64), idx_array, True
+
 
     def get_coords(self, entities, exceptions = ()):
         """
@@ -1577,10 +1524,7 @@ cdef class Core(object):
             coords = np.empty((3*r.size(),),dtype='float64')
             err = self.inst.get_coords(deref(r.inst), <double*> coords.data)
         else:
-            if isinstance(entities, np.ndarray):
-              arr = entities
-            else:
-              arr = _eh_array(entities)
+            arr = _eh_array(entities)
             coords = np.empty((3*len(arr),),dtype='float64')
             err = self.inst.get_coords(<eh.EntityHandle*> arr.data, len(entities), <double*> coords.data)
         check_error(err, exceptions)
@@ -1995,7 +1939,7 @@ cdef class Core(object):
 
     def get_interface_faces(self, con, par, inter, bound, bound_par, num_c, fac_vec):
 
-        cdef np.ndarray[np.int16_t, ndim = 2] faces_neigh = fac_vec
+        cdef np.ndarray[np.uint16_t, ndim = 2] faces_neigh = fac_vec
         cdef np.ndarray[np.uint16_t, ndim = 3] connectivities = con
         cdef np.ndarray[np.int32_t, ndim = 2] parts = par
         cdef np.ndarray[np.uint64_t, ndim = 1] interface_faces = inter
@@ -2029,7 +1973,7 @@ cdef class Core(object):
     def get_interface_entities(self, dim, con, inter, coarses, indx, bound, bound_parts, num_c, entity_vec):
 
         cdef int entity_dim = dim
-        cdef np.ndarray[np.int16_t, ndim = 2] entity_neigh = entity_vec
+        cdef np.ndarray[np.uint16_t, ndim = 2] entity_neigh = entity_vec
         cdef np.ndarray[np.uint16_t, ndim = 3] connectivities = con
         cdef np.ndarray[np.int32_t, ndim = 2] parts = np.array([], dtype=np.int32).reshape(-1, 2)
         cdef np.ndarray[np.uint64_t, ndim = 1] interface_ent_1 = np.array([], dtype=np.uint64)

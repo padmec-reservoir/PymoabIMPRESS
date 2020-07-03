@@ -6,6 +6,8 @@ from .types import _eh_array, _eh_py_type
 from libcpp.vector cimport vector
 cimport numpy as np
 import numpy as np
+import sys
+import time
 
 cdef void *null = NULL
 
@@ -36,8 +38,11 @@ def unite(Range r1, Range r2):
     r.inst.merge(i)
     return r
 
-cdef class Range(object):
 
+
+cdef class Range(object):
+    ranges_in_memory=[]
+    count_memory=[0]
     def __cinit__(self, arg = None):
         """
         Constructor.
@@ -46,7 +51,15 @@ cdef class Range(object):
 
         If no argument is provided, an empty Range will be created and returned.
         """
+        cdef int cnt_mem = Range.count_memory[0]
+        cnt_mem = (cnt_mem+1)%30
+        if cnt_mem == 10:
+          self.__checkmemory__()
         self.inst = new moab.Range()
+        Range.ranges_in_memory.append(self)
+        Range.count_memory[0]= cnt_mem
+
+
         if arg is None:
             return
         if isinstance(arg, _eh_py_type):
@@ -55,6 +68,9 @@ cdef class Range(object):
         elif isinstance(arg, Range):
             for eh in arg:
                 self.inst.insert(eh)
+        #create from numpy array
+        elif isinstance(arg, np.ndarray):
+            self.insert_array(arg)
         #create from iterable
         elif arg is not None:
             entity_array = _eh_array(arg)
@@ -62,6 +78,24 @@ cdef class Range(object):
                 self.inst.insert(eh)
         else:
             raise ValueError("Not a valid argument to Range constructor.")
+
+    def __checkmemory__(self):
+        cdef int i = len(Range.ranges_in_memory)-1
+        cdef int j = 0
+        if i<20:
+          return
+        while i>=0:
+          j = j+1
+          if j>=20:
+            if(sys.getrefcount(Range.ranges_in_memory[i]) <= 2):
+                Range.ranges_in_memory[i].__del__()
+                del(Range.ranges_in_memory[i])
+          i-=1
+    def __printmemory__(self):
+        for i in range(len(Range.ranges_in_memory)):
+          print(sys.getrefcount(Range.ranges_in_memory[i]))
+        print('-------------')
+
 
     def __getstate__(self):
         """
@@ -133,9 +167,12 @@ cdef class Range(object):
         """Returns the number of EntityHandles with EntityType, t, in the Range."""
         return self.inst.num_of_type(t)
 
-    def insert(self, moab.EntityHandle eh):
+    def insert(self, arg):
         """Inserts the EntityHandle, eh, into the Range."""
-        self.inst.insert(eh)
+        if isinstance(arg, np.ndarray):
+          self.insert_array(arg)
+        else:
+          self.inst.insert(<moab.EntityHandle> arg)
 
     def merge(self, other):
         """Merges this Range with another Range, other."""
@@ -217,14 +254,10 @@ cdef class Range(object):
             if key.stop == None:
               return self.__getitem__(np.arange(key.start, self.size(), key.step, dtype = np.int64))
             return self.__getitem__(np.arange(key.start, key.stop, key.step, dtype = np.int64))
-            # step = key.step if key.step is not None else 1
-            # start = key.start if key.start is not None else 0
-            # stop = key.stop if key.stop is not None else len(self)
-            # ents = list(self)[start:stop:step]
         elif isinstance(key, list):
-             for keyitem in key:
-               rtnrng.insert(self.get_int_key(keyitem))
-             return rtnrng
+            return self.__getitem__(np.array(key, dtype = np.int64))
+        elif isinstance(key, tuple):
+            return self.__getitem__(np.array(key, dtype = np.int64))
         elif isinstance(key, np.ndarray):
             if key.dtype is np.dtype('bool'):
               keyBoolArray = key
@@ -254,48 +287,48 @@ cdef class Range(object):
       """
       Fast conversion to numpy arrays
       """
-      cdef int i=0
-      cdef int j=0
-      cdef np.ndarray[np.uint64_t, ndim = 1] retArray
-      cdef np.ndarray[np.int64_t, ndim = 1] keyArray64
-      cdef np.ndarray[np.int32_t, ndim = 1] keyArray32
-      cdef np.ndarray[np.uint8_t, cast = True, ndim = 1] keyBoolArray
+
       if key is None:
-          retArray = np.empty(self.size(), dtype = np.uint64)
-          for i in range(self.size()):
-            retArray[i] = deref(self.inst)[i]
-          return retArray
+          return self.get_array_2()
       elif isinstance(key, np.ndarray):
-          if key.dtype not in [np.dtype('int32'), np.dtype('int64'), np.dtype('bool')]:
-            raise ValueError("Invalid numpy array: (dtype: {}) provided.".format(key.dtype))
-          retArray = np.empty(key.size, dtype = np.uint64)
-          if key.dtype is np.dtype('int32'):
-            keyArray32 = key
-            for i in range(keyArray32.size):
-              retArray[i] = deref(self.inst)[keyArray32[i]]
-            return retArray
-          elif key.dtype is np.dtype('int64'):
-            keyArray64 = key
-            for i in range(keyArray64.size):
-              retArray[i] = deref(self.inst)[keyArray64[i]]
-            return retArray
-          keyBoolArray = key
-          for i in range(keyBoolArray.size):
-            if keyBoolArray[i]:
-              retArray[j] = deref(self.inst)[i]
-              j = j+1
-          return retArray[:j]
+          return self.get_array_3(key)
+
       elif isinstance(key, slice):
           if key.start == None and key.stop == None:
             return self.get_array()
           if key.start == None:
-            return self.get_array(np.arange(0, key.stop, key.step, dtype = np.int64))
+            return self.get_array(np.arange(0, key.stop, key.step, dtype = np.int32))
           if key.stop == None:
-            return self.get_array(np.arange(key.start, self.size(), key.step, dtype = np.int64))
-          return self.get_array(np.arange(key.start, key.stop, key.step, dtype = np.int64))
+            return self.get_array(np.arange(key.start, self.size(), key.step, dtype = np.int32))
+          return self.get_array(np.arange(key.start, key.stop, key.step, dtype = np.int32))
+      elif isinstance(key, list):
+          return self.get_array(np.array(key, dtype = np.int64))
+      elif isinstance(key, tuple):
+          return self.get_array(np.array(key, dtype = np.int64))
       else:
           return self.__getitem__(key).get_array()
 
+    def get_array_2(self):
+
+        cdef np.ndarray [eh.EntityHandle] ret_vec = np.empty(self.size(), dtype = np.uint64)
+        self.inst.get_entity_vector(<eh.EntityHandle*> ret_vec.data)
+        return ret_vec
+
+    def get_array_3(self, key):
+        cdef np.ndarray [np.int32_t] key_vector
+        cdef np.ndarray [eh.EntityHandle] ret_vec
+        if key.dtype is np.dtype('int64'):
+          key = key.astype(np.intc)
+        elif key.dtype is np.dtype('bool'):
+          key = (np.nonzero(key)[0]).astype(np.intc)
+        ret_vec = np.empty(key.size, dtype = np.uint64)
+        key_vector = key
+        self.inst.get_entity_vector_key(<eh.EntityHandle*> ret_vec.data, <const int *> key_vector.data, key_vector.size)
+        return ret_vec
+
+    def insert_array(self, arg):
+        cdef np.ndarray [eh.EntityHandle] entities = arg
+        self.inst.insert_entity_vector(<eh.EntityHandle*> entities.data, arg.size)
 
     def __richcmp__(self, other, op):
         cdef Range r

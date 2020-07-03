@@ -84,59 +84,39 @@ cdef class MeshTopoUtil(object):
                                from_ent,
                                int bridge_dim,
                                int to_dim,
-                               Core mb = None,
-                               Tag tag_handle = None,
                                all_ents = None,
                                int level = 0,
                                exceptions = ()):
         cdef moab.ErrorCode err
         cdef moab.EntityHandle ms_handle
-        cdef Range r
-        cdef int npinput = 0
         cdef int idx_count = 0
         cdef bint jagged = 0
         cdef int default_size = 0
-        cdef vector[eh.EntityHandle] rangeList
-        cdef np.ndarray[np.int64_t] tag_array
-        cdef np.ndarray[np.uint64_t] handle_array
+        cdef vector[eh.EntityHandle] tempVector
+        cdef np.ndarray[np.uint64_t] temp_array
         cdef np.ndarray[dtype = np.uint64_t, ndim = 1] inputArray
-        cdef eh.EntityHandle element
+        cdef np.ndarray[dtype = np.int32_t, ndim = 1] idx_array
         cdef int siz
         if isinstance(from_ent, Range):
-            r = from_ent
+          inputArray = from_ent.get_array()
         elif isinstance(from_ent, np.ndarray):
-            inputArray = from_ent
-            npinput = 1
-            siz = inputArray.size
+          inputArray = from_ent
         else:
-            r = Range(from_ent)
-        if not npinput:
-          siz = r.size()
+          inputArray = np.array(from_ent, dtype = np.uint64)
+        siz = inputArray.size
         cdef Range adjs = Range()
         cdef int i
         cdef int j
         cdef int sizj
-        cdef bint tag_opt = False
-        if tag_handle is not None:
-          tag_opt = True
-        cdef np.ndarray[dtype = np.int32_t, ndim = 1] idx_array = np.empty(siz, dtype = np.int32)
+        idx_array = np.empty(siz, dtype = np.int32)
         for i in range(siz):
-          if npinput:
-            err = self.inst.get_bridge_adjacencies(inputArray[i], bridge_dim, to_dim, deref(adjs.inst))
-          else:
-            err = self.inst.get_bridge_adjacencies(r[i], bridge_dim, to_dim, deref(adjs.inst))
+          err = self.inst.get_bridge_adjacencies(inputArray[i], bridge_dim, to_dim, deref(adjs.inst))
           check_error(err, exceptions)
           if level:
             adjs = rng.intersect(adjs, all_ents)
-          sizj = adjs.size()
-          if tag_opt:
-            tag_array = mb.tag_get_data(tag_handle, adjs, flat=True).astype(np.int64)
-            for j in range(sizj):
-              rangeList.push_back(tag_array[j])
-          else:
-            handle_array = adjs.get_array()
-            for j in range(sizj):
-              rangeList.push_back(handle_array[j])
+          temp_array = adjs.get_array()
+          sizj = temp_array.size
+          tempVector.insert(tempVector.end(), <eh.EntityHandle*> temp_array.data, <eh.EntityHandle*> temp_array.data+sizj)
           if not jagged:
             if default_size==0:
               default_size = sizj
@@ -145,13 +125,9 @@ cdef class MeshTopoUtil(object):
           idx_count = idx_count + sizj
           idx_array[i] = idx_count
           adjs.clear()
-        if siz==1:
-          if jagged:
-            return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)[0]
-          return np.array(rangeList).reshape((-1, default_size))[0]
         if jagged:
-          return np.delete(np.array(np.split(np.array(rangeList), idx_array)), -1)
-        return np.array(rangeList).reshape((-1, default_size))
+          return np.array(tempVector, dtype=np.uint64), idx_array, jagged
+        return np.array(tempVector, dtype=np.uint64), default_size, jagged
 
     def get_average_position(self,
                              entity_handles,
@@ -203,6 +179,31 @@ cdef class MeshTopoUtil(object):
             check_error(err, exceptions)
 
         return avg_position
+
+    def get_ord_average_position(self,
+                             entity_handles,
+                             exceptions = ()):
+        cdef moab.ErrorCode err
+        cdef moab.EntityHandle ms_handle
+        cdef int i
+        cdef np.ndarray[np.uint64_t, ndim=1] arr
+        cdef np.ndarray avg_position
+        cdef np.ndarray[np.double_t, ndim=2] avg_array
+        if isinstance(entity_handles, Range):
+          arr = entity_handles.get_array()
+        elif isinstance(entity_handles, np.ndarray):
+          arr = entity_handles
+        else:
+          arr = np.array(entity_handles, dtype = np.uint64)
+        siz = arr.size
+        avg_array=np.empty((siz, 3), dtype=np.double)
+        for i in range(siz):
+            avg_position = np.empty((3,),dtype='float64')
+            err = self.inst.get_average_position(<moab.EntityHandle*> arr.data+i, 1, <double*> avg_position.data)
+            check_error(err, exceptions)
+            avg_array[i]=avg_position
+
+        return avg_array
 
     def construct_aentities(self,
                             vertices,

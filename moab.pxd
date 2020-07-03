@@ -6,6 +6,7 @@ from libcpp.string cimport string as std_string
 from eh cimport EntityHandle, EntityID
 cimport numpy as np
 
+
 cdef extern from 'moab/Types.hpp' namespace "moab":
 
     ctypedef enum EntitySetProperty:
@@ -100,6 +101,9 @@ cdef extern from "moab/Range.hpp" namespace "moab":
         size_t psize()
         bint empty()
         void clear()
+        void get_entity_vector(EntityHandle *entity_vector)
+        void get_entity_vector_key(EntityHandle *entity_vector, const int *key_vector, const int key_size)
+        void insert_entity_vector(EntityHandle *entity_vector, const int vector_size)
         bool all_of_type(EntityType t)
         bool all_of_dimension(int dimension)
         unsigned num_of_type( EntityType type )
@@ -198,6 +202,11 @@ cdef extern from "moab/Core.hpp" namespace "moab":
         ErrorCode get_connectivity(const EntityHandle *entity_handles,
                                    const int num_handles,
                                    vector[EntityHandle] & connectivity)
+        ErrorCode get_connectivity_with_size(const EntityHandle *entity_handles,
+                                  const int num_handles,
+                                  vector[EntityHandle] & connectivity,
+                                  int *size_vector,
+                                  int *jagged)
         ErrorCode get_connectivity(const EntityHandle *entity_handles,
                                    const int num_handles,
                                    vector[EntityHandle] & connectivity,
